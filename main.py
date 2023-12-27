@@ -5,8 +5,8 @@ import re
 from collections import Counter
 
 DATASET_FILE_NAME = "dataset.zip"
-MAXIMUM_SEQ_LENGTH = 10000
-MAXIMUM_INPUT_POINTS = 250
+MAXIMUM_SEQ_LENGTH = 10000 # Number of maximum tokens
+MAXIMUM_INPUT_POINTS = 250 # Number of perceptrons on input layer
 
 def get_dataset_contents(file_name) -> pd.DataFrame:
     """ Returns pandas dataframe of IMDB reviews and sentiment. """
@@ -22,8 +22,16 @@ def standardize_data(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def vectorize_data(df: pd.DataFrame) -> pd.DataFrame:
-    df["review"] = df["review"].apply(lambda x: x.split(" "))
-    print(df.head(10))
+    """ Given a standardized dataframe, returns a vectorized dataframe """
+    #TODO: Get rid of error messages
+    df = df[df["review"].map(len) <= MAXIMUM_SEQ_LENGTH]
+    input_tokens = [tup[0] for tup in Counter(" ".join(df["review"]).split()).most_common(MAXIMUM_INPUT_POINTS)]
+    vectorized_df = pd.DataFrame()
+    for token in input_tokens:
+        vectorized_df[token] = df["review"].apply(lambda x: int(token in x))
+    vectorized_df["sentiment"] = df["sentiment"]
+    return vectorized_df    
+
 
 
 def classify_text() -> list:
