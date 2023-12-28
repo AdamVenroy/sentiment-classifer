@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import re
 from collections import Counter
+import tensorflow as tf
 
 DATASET_FILE_NAME = "dataset.zip"
 MAXIMUM_SEQ_LENGTH = 10000 # Number of maximum tokens
@@ -38,6 +39,33 @@ def vectorize_data(df: pd.DataFrame) -> pd.DataFrame:
     return vectorized_df
 
 
+def create_model(df: pd.DataFrame):
+    target = df.pop('target')
+    print(target.shape)
+    print(df.shape)
+    normalizer = tf.keras.layers.Normalization(axis=-1)
+    normalizer.adapt(df)
+    model = tf.keras.Sequential([
+        normalizer,
+        tf.keras.layers.Dense(125, activation='relu'),
+        tf.keras.layers.Dense(60, activation='relu'),
+        tf.keras.layers.Dense(1)
+    ])
+    model.compile(optimizer='adam',
+                loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+                metrics=['accuracy'])
+    
+    model.fit(df, target, epochs=5, batch_size=1)
+
+    return model
+
+
+def test_model(df: pd.DataFrame, model):
+    target = df.pop('target')
+    results = model.evaluate(df, target)
+    print(results)
+
+
 def classify_text() -> list:
     """ Given a string returns a list where the first value is 
     the probality that the text has a positive sentiment, 
@@ -51,7 +79,15 @@ def main():
     pass
 
 if __name__ == "__main__":
+    print("Getting dataset...")
     x = get_dataset_contents(DATASET_FILE_NAME)
+    print("Standardizing data...")
     x = standardize_data(x)
+    print("Vectorizing data...")
     x = vectorize_data(x)
-    print(x)
+    training_data = x[:25000]
+    testing_data = x[25000:]
+    print("Creating model...")
+    model = create_model(training_data)
+    test_model(testing_data, model)
+
