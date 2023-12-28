@@ -6,9 +6,9 @@ from collections import Counter
 import tensorflow as tf
 
 DATASET_FILE_NAME = "dataset.zip"
-MAXIMUM_SEQ_LENGTH = 10000 # Number of maximum tokens
-MAXIMUM_INPUT_POINTS = 250 # Number of perceptrons on input layer
-
+SEQUENCE_LENGTH = 250 # Number of maximum tokens
+MAX_FEATURES = 10000 # Number of perceptrons on input layer
+AMOUNT_OF_TRAINING_DATA = 25000
 
 def get_dataset_contents(file_name) -> pd.DataFrame:
     """ Returns pandas dataframe of IMDB reviews and sentiment. """
@@ -21,49 +21,48 @@ def standardize_data(df: pd.DataFrame) -> pd.DataFrame:
     df["review"] = df["review"].apply(lambda x: x.lower())
     df["review"] = df["review"].apply(lambda x: re.sub(r'<[^>]*>', ' ', x))
     df["review"] = df["review"].apply(lambda x: re.sub(r'[^\w\s]', '', x))
+    df['target'] = df['sentiment'].str.contains('positive')
+    df['target'] = df['target'].apply(int)
     return df
 
 
-def vectorize_data(df: pd.DataFrame) -> pd.DataFrame:
+def vectorize_data(df: pd.DataFrame) -> tf.Tensor:
     """ Given a standardized dataframe, returns a vectorized dataframe """
-    df = df[df["review"].map(lambda x: len(x.split())) <= MAXIMUM_SEQ_LENGTH]
-    input_tokens = [tup[0] for tup in Counter(" ".join(df["review"]).split()).most_common(MAXIMUM_INPUT_POINTS)]
-    series_list = []
-
-    for token in input_tokens:
-        series_list.append(df["review"].apply(lambda x: int(token in x)))
-
-    vectorized_df = pd.concat(series_list, axis=1, keys=input_tokens)
-    vectorized_df['target'] = df['sentiment'].str.contains('positive')
-    vectorized_df['target'] = vectorized_df['target'].apply(int)
-    return vectorized_df
+    vectorize_layer = tf.keras.layers.TextVectorization(max_tokens=MAX_FEATURES, 
+                                                        output_mode='int', output_sequence_length=SEQUENCE_LENGTH)
+    vectorize_layer.adapt(df['review'])
+    return vectorize_layer(df['review'])
 
 
-def create_model(df: pd.DataFrame):
+def create_model(df: pd.DataFrame) -> tf.keras.Model:
+    """ Creates and trains the model based on vectorized data. """
+    vectorized_data = vectorize_data(df)
     target = df.pop('target')
-    print(target.shape)
-    print(df.shape)
-    normalizer = tf.keras.layers.Normalization(axis=-1)
-    normalizer.adapt(df)
     model = tf.keras.Sequential([
-        normalizer,
-        tf.keras.layers.Dense(125, activation='relu'),
-        tf.keras.layers.Dense(60, activation='relu'),
-        tf.keras.layers.Dense(1)
-    ])
+        tf.keras.layers.Embedding(MAX_FEATURES, 16),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.GlobalAveragePooling1D(),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(1)]
+    )
+
     model.compile(optimizer='adam',
                 loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
-                metrics=['accuracy'])
+                metrics=tf.metrics.BinaryAccuracy(threshold=0.0)
+    )
+
     
-    model.fit(df, target, epochs=5, batch_size=1)
+    model.fit(vectorized_data, target, epochs=15, batch_size=32)
 
     return model
 
 
 def test_model(df: pd.DataFrame, model):
-    target = df.pop('target')
-    results = model.evaluate(df, target)
-    print(results)
+    """ Prints data from evaluating test."""
+    x = vectorize_data(df)
+    y = df.pop('target')
+    results = model.evaluate(x, y, batch_size=32)
+    print(f"loss: {results[0]}, accuracy: {results[1]}")
 
 
 def classify_text() -> list:
@@ -83,11 +82,8 @@ if __name__ == "__main__":
     x = get_dataset_contents(DATASET_FILE_NAME)
     print("Standardizing data...")
     x = standardize_data(x)
-    print("Vectorizing data...")
-    x = vectorize_data(x)
-    training_data = x[:25000]
-    testing_data = x[25000:]
-    print("Creating model...")
-    model = create_model(training_data)
+    training_data = x[:AMOUNT_OF_TRAINING_DATA]
+    testing_data = x[AMOUNT_OF_TRAINING_DATA:]
+    model = create_model(x)
     test_model(testing_data, model)
 
