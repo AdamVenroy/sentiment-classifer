@@ -10,7 +10,7 @@ SEQUENCE_LENGTH = 250 # Number of maximum tokens
 MAX_FEATURES = 10000 # Number of perceptrons on input layer
 AMOUNT_OF_TRAINING_DATA = 25000
 
-def get_dataset_contents(file_name) -> pd.DataFrame:
+def get_dataset_contents(file_name: str) -> pd.DataFrame:
     """ Returns pandas dataframe of IMDB reviews and sentiment. """
     return pd.read_csv(file_name)
 
@@ -36,15 +36,21 @@ def vectorize_data(df: pd.DataFrame) -> tf.Tensor:
 
 def create_model(df: pd.DataFrame) -> tf.keras.Model:
     """ Creates and trains the model based on vectorized data. """
-    vectorized_data = vectorize_data(df)
+    training_input_data = vectorize_data(df)
     target = df.pop('target')
+    normalizer = tf.keras.layers.Normalization(axis=-1)
+    normalizer.adapt(training_input_data)
+
+    training_output_data = target
+    print(training_input_data)
     model = tf.keras.Sequential([
-        tf.keras.layers.Embedding(MAX_FEATURES, 16),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.GlobalAveragePooling1D(),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.Dense(1)]
-    )
+        normalizer,
+        tf.keras.layers.Dense(125, activation='relu'),
+        tf.keras.layers.Dense(60, activation='relu'),
+        tf.keras.layers.Dense(30, activation='relu'),
+        tf.keras.layers.Dense(15, activation='relu'),
+        tf.keras.layers.Dense(1)
+    ])
 
     model.compile(optimizer='adam',
                 loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
@@ -52,16 +58,16 @@ def create_model(df: pd.DataFrame) -> tf.keras.Model:
     )
 
     
-    model.fit(vectorized_data, target, epochs=15, batch_size=32)
+    model.fit(training_input_data, training_output_data, epochs=50)
 
     return model
 
 
-def test_model(df: pd.DataFrame, model):
+def test_model(df: pd.DataFrame, model: tf.keras.Model) -> None:
     """ Prints data from evaluating test."""
     x = vectorize_data(df)
     y = df.pop('target')
-    results = model.evaluate(x, y, batch_size=32)
+    results = model.evaluate(x, y)
     print(f"loss: {results[0]}, accuracy: {results[1]}")
 
 
