@@ -2,7 +2,7 @@ Text classification using IMDB dataset to train.
 
 
 Download Dataset here:
-https://www.kaggle.com/datasets/lakshmi25npathi/imdb-dataset-of-50k-movie-reviews
+https://ai.stanford.edu/~amaas/data/sentiment/
 
 Resources used:
 https://www.tensorflow.org/tutorials/keras/text_classification
