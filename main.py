@@ -1,6 +1,3 @@
-import numpy as np  
-import matplotlib.pyplot as plt 
-import pandas as pd
 import re
 import string
 import os
@@ -10,7 +7,6 @@ import tensorflow as tf
 URL = "https://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz"
 SEQUENCE_LENGTH = 250 # Number of maximum tokens
 MAX_FEATURES = 10000 # Number of perceptrons on input layer
-AMOUNT_OF_TRAINING_DATA = 25000
 BATCH_SIZE = 32
 SEED = 42
 
