@@ -85,11 +85,9 @@ def vectorize_text(text, label, vectorize_layer):
   text = tf.expand_dims(text, -1)
   return vectorize_layer(text), label
 
-def create_model(raw_training_dataset, raw_validation_dataset) -> tf.keras.Model:
+
+def create_model(training_dataset, validation_dataset) -> tf.keras.Model:
     """ Creates and trains the model. """
-    vectorization_layer = create_vectorization_layer(raw_training_dataset)
-    training_dataset = raw_training_dataset.map(lambda x, y: vectorize_text(x, y, vectorization_layer))
-    validation_dataset = raw_validation_dataset.map(lambda x, y: vectorize_text(x, y, vectorization_layer))
 
     AUTOTUNE = tf.data.AUTOTUNE
     training_dataset = training_dataset.cache().prefetch(buffer_size=AUTOTUNE)
@@ -115,20 +113,56 @@ def create_model(raw_training_dataset, raw_validation_dataset) -> tf.keras.Model
     return model
 
 
-def classify_text() -> list:
-    """ Given a string returns a list where the first value is 
-    the probality that the text has a positive sentiment, 
-    and the second value is the probability that the text has 
-    a negative sentiment. """
-    pass
+def build_and_export_model():
+    """ Builds the model, saves the model without vectorization as model.keras and also returns it. """
+    raw_train_ds, raw_val_ds, raw_test_ds = get_data_from_dataset_folder()
+    vectorization_layer = create_vectorization_layer(raw_train_ds)
+    train_ds = raw_train_ds.map(lambda x, y: vectorize_text(x, y, vectorization_layer))
+    val_ds = raw_val_ds.map(lambda x, y: vectorize_text(x, y, vectorization_layer))
+    test_ds = raw_test_ds.map(lambda x, y: vectorize_text(x, y, vectorization_layer))
+
+    model = create_model(train_ds, val_ds)
+    loss, accuracy = model.evaluate(test_ds)
+    print("Loss:", loss)
+    print("Accuracy:", accuracy)
+
+    model.save("model.keras")
+
+    export_model = tf.keras.Sequential([
+        vectorization_layer,
+        model,
+        tf.keras.layers.Activation('sigmoid')
+        ])
+
+    export_model.compile(
+        loss=tf.keras.losses.BinaryCrossentropy(from_logits=False), optimizer="adam", metrics=['accuracy']
+    )
+
+
+    return export_model
+
+
+def load_model(raw_train_ds) -> tf.keras.Model:
+    """ Loads the model in model.keras and adds layers for additional use. """
+    model = tf.keras.models.load_model('model.keras')
+    vectorization_layer = create_vectorization_layer(raw_train_ds)
+    export_model = tf.keras.Sequential([
+        vectorization_layer,
+        model,
+        tf.keras.layers.Activation('sigmoid')
+        ]
+    )
+
+    export_model.compile(
+        loss=tf.keras.losses.BinaryCrossentropy(from_logits=False), optimizer="adam", metrics=['accuracy']
+    )
+
+    return export_model
 
 
 def main():
     """ Main function """
     pass
-def vectorize_text(text, label, vectorize_layer):
-  text = tf.expand_dims(text, -1)
-  return vectorize_layer(text), label
+
 if __name__ == "__main__":
-    raw_train_ds, raw_val_ds, raw_test_ds = get_data_from_dataset_folder()
-    m = create_model(raw_train_ds, raw_val_ds)
+    build_and_export_model()
