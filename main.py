@@ -2,17 +2,60 @@ import numpy as np
 import matplotlib.pyplot as plt 
 import pandas as pd
 import re
-from collections import Counter
+import os
+import shutil
 import tensorflow as tf
 
-DATASET_FILE_NAME = "dataset.zip"
+URL = "https://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz"
 SEQUENCE_LENGTH = 250 # Number of maximum tokens
 MAX_FEATURES = 10000 # Number of perceptrons on input layer
 AMOUNT_OF_TRAINING_DATA = 25000
+BATCH_SIZE = 32
+SEED = 42
 
-def get_dataset_contents(file_name: str) -> pd.DataFrame:
-    """ Returns pandas dataframe of IMDB reviews and sentiment. """
-    return pd.read_csv(file_name)
+def download_dataset_file():
+    """ Downloads the file from the URL and unzips it """
+    tf.keras.utils.get_file("aclImdb_v1", URL,
+                                    untar=True, cache_dir='.',
+                                    cache_subdir='')
+
+
+
+def get_data_from_dataset_folder():
+    """ Looks into the directorys from the unzipped file and returns the training,
+    validation and testing datasets."""
+    dataset_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'aclImdb')
+    train_dir = os.path.join(dataset_dir, 'train')
+    remove_dir = os.path.join(train_dir, 'unsup')
+    shutil.rmtree(remove_dir)
+
+    raw_train_ds = tf.keras.utils.text_dataset_from_directory(
+        'aclImdb/train', 
+        batch_size=BATCH_SIZE, 
+        validation_split=0.2, 
+        subset='training', 
+        seed=SEED
+        )
+    
+    raw_val_ds = tf.keras.utils.text_dataset_from_directory(
+        'aclImdb/train', 
+        batch_size=BATCH_SIZE, 
+        validation_split=0.2, 
+        subset='validation', 
+        seed=SEED
+    )
+
+    raw_test_ds = tf.keras.utils.text_dataset_from_directory(
+        'aclImdb/test', 
+        batch_size=BATCH_SIZE
+    )
+
+    return raw_train_ds, raw_val_ds, raw_test_ds
+    
+
+
+
+
 
 
 def standardize_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -84,12 +127,4 @@ def main():
     pass
 
 if __name__ == "__main__":
-    print("Getting dataset...")
-    x = get_dataset_contents(DATASET_FILE_NAME)
-    print("Standardizing data...")
-    x = standardize_data(x)
-    training_data = x[:AMOUNT_OF_TRAINING_DATA]
-    testing_data = x[AMOUNT_OF_TRAINING_DATA:]
-    model = create_model(x)
-    test_model(testing_data, model)
-
+    a, b, c = get_data_from_dataset_folder()
