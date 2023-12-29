@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt 
 import pandas as pd
 import re
+import string
 import os
 import shutil
 import tensorflow as tf
@@ -20,16 +21,19 @@ def download_dataset_file():
                                     cache_subdir='')
 
 
-
 def get_data_from_dataset_folder():
     """ Looks into the directorys from the unzipped file and returns the training,
     validation and testing datasets."""
+    
     dataset_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'aclImdb')
     train_dir = os.path.join(dataset_dir, 'train')
     remove_dir = os.path.join(train_dir, 'unsup')
-    shutil.rmtree(remove_dir)
+    try:
+        shutil.rmtree(remove_dir)
+    except FileNotFoundError:
+        print("unsupervised data already removed.")
 
-    raw_train_ds = tf.keras.utils.text_dataset_from_directory(
+    raw_training_dataset = tf.keras.utils.text_dataset_from_directory(
         'aclImdb/train', 
         batch_size=BATCH_SIZE, 
         validation_split=0.2, 
@@ -37,7 +41,7 @@ def get_data_from_dataset_folder():
         seed=SEED
         )
     
-    raw_val_ds = tf.keras.utils.text_dataset_from_directory(
+    raw_validation_dataset = tf.keras.utils.text_dataset_from_directory(
         'aclImdb/train', 
         batch_size=BATCH_SIZE, 
         validation_split=0.2, 
@@ -45,73 +49,70 @@ def get_data_from_dataset_folder():
         seed=SEED
     )
 
-    raw_test_ds = tf.keras.utils.text_dataset_from_directory(
+    raw_testing_dataset = tf.keras.utils.text_dataset_from_directory(
         'aclImdb/test', 
         batch_size=BATCH_SIZE
     )
 
-    return raw_train_ds, raw_val_ds, raw_test_ds
-    
+    return raw_training_dataset, raw_validation_dataset, raw_testing_dataset
 
 
+def custom_standardization(input_data):
+  """ Standardisation function for stripping reviews into tokens for 
+  vectorization"""
+  lowercase = tf.strings.lower(input_data)
+  stripped_html = tf.strings.regex_replace(lowercase, '<br />', ' ')
+  return tf.strings.regex_replace(stripped_html,
+                                  '[%s]' % re.escape(string.punctuation),
+                                  '')
 
 
-
-
-def standardize_data(df: pd.DataFrame) -> pd.DataFrame:
-    """ Turns all text lowerspace, removes html tags"""
-    # Standardization
-    df["review"] = df["review"].apply(lambda x: x.lower())
-    df["review"] = df["review"].apply(lambda x: re.sub(r'<[^>]*>', ' ', x))
-    df["review"] = df["review"].apply(lambda x: re.sub(r'[^\w\s]', '', x))
-    df['target'] = df['sentiment'].str.contains('positive')
-    df['target'] = df['target'].apply(int)
-    return df
-
-
-def vectorize_data(df: pd.DataFrame) -> tf.Tensor:
-    """ Given a standardized dataframe, returns a vectorized dataframe """
-    vectorize_layer = tf.keras.layers.TextVectorization(max_tokens=MAX_FEATURES, 
-                                                        output_mode='int', output_sequence_length=SEQUENCE_LENGTH)
-    vectorize_layer.adapt(df['review'])
-    return vectorize_layer(df['review'])
-
-
-def create_model(df: pd.DataFrame) -> tf.keras.Model:
-    """ Creates and trains the model based on vectorized data. """
-    training_input_data = vectorize_data(df)
-    target = df.pop('target')
-    normalizer = tf.keras.layers.Normalization(axis=-1)
-    normalizer.adapt(training_input_data)
-
-    training_output_data = target
-    print(training_input_data)
-    model = tf.keras.Sequential([
-        normalizer,
-        tf.keras.layers.Dense(125, activation='relu'),
-        tf.keras.layers.Dense(60, activation='relu'),
-        tf.keras.layers.Dense(30, activation='relu'),
-        tf.keras.layers.Dense(15, activation='relu'),
-        tf.keras.layers.Dense(1)
-    ])
-
-    model.compile(optimizer='adam',
-                loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
-                metrics=tf.metrics.BinaryAccuracy(threshold=0.0)
+def create_vectorization_layer(raw_training_dataset):
+    """ Creates vectorization layer for NN and adapts it to training text."""
+    vectorize_layer = tf.keras.layers.TextVectorization(
+        standardize=custom_standardization,
+        max_tokens=MAX_FEATURES,
+        output_sequence_length=SEQUENCE_LENGTH
     )
 
+    train_text = raw_training_dataset.map(lambda x, y: x)
+    vectorize_layer.adapt(train_text)
+
+    return vectorize_layer
+
+
+def vectorize_text(text, label, vectorize_layer):
+  text = tf.expand_dims(text, -1)
+  return vectorize_layer(text), label
+
+def create_model(raw_training_dataset, raw_validation_dataset) -> tf.keras.Model:
+    """ Creates and trains the model. """
+    vectorization_layer = create_vectorization_layer(raw_training_dataset)
+    training_dataset = raw_training_dataset.map(lambda x, y: vectorize_text(x, y, vectorization_layer))
+    validation_dataset = raw_validation_dataset.map(lambda x, y: vectorize_text(x, y, vectorization_layer))
+
+    AUTOTUNE = tf.data.AUTOTUNE
+    training_dataset = training_dataset.cache().prefetch(buffer_size=AUTOTUNE)
+    validation_dataset = validation_dataset.cache().prefetch(buffer_size=AUTOTUNE)
+
+    model = tf.keras.Sequential([
+        tf.keras.layers.Embedding(MAX_FEATURES, 16),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.GlobalAveragePooling1D(),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(1)]
+    )
+
+    model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+              optimizer='adam',
+              metrics=tf.metrics.BinaryAccuracy(threshold=0.0))
+
+    model.fit(
+        training_dataset,
+        validation_data=validation_dataset,
+        epochs=10)
     
-    model.fit(training_input_data, training_output_data, epochs=50)
-
     return model
-
-
-def test_model(df: pd.DataFrame, model: tf.keras.Model) -> None:
-    """ Prints data from evaluating test."""
-    x = vectorize_data(df)
-    y = df.pop('target')
-    results = model.evaluate(x, y)
-    print(f"loss: {results[0]}, accuracy: {results[1]}")
 
 
 def classify_text() -> list:
@@ -125,6 +126,9 @@ def classify_text() -> list:
 def main():
     """ Main function """
     pass
-
+def vectorize_text(text, label, vectorize_layer):
+  text = tf.expand_dims(text, -1)
+  return vectorize_layer(text), label
 if __name__ == "__main__":
-    a, b, c = get_data_from_dataset_folder()
+    raw_train_ds, raw_val_ds, raw_test_ds = get_data_from_dataset_folder()
+    m = create_model(raw_train_ds, raw_val_ds)
